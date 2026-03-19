@@ -1,0 +1,79 @@
+name: 'WordPress Site Deploy Action'
+description: 'Deploy wp-content to a remote server using SSH and SCP. Includes .distignore and optional Slack notifications.'
+author: 'Sultan Nasir Uddin'
+branding:
+  icon: 'upload-cloud'
+  color: 'blue'
+
+inputs:
+  ssh_host:
+    description: 'Remote host/IP'
+    required: true
+  ssh_user:
+    description: 'SSH username'
+    required: true
+  deploy_path:
+    description: 'Full deployment path on the server'
+    required: true
+  ssh_key:
+    description: 'Private SSH key'
+    required: true
+  site_url:
+    description: 'Site URL (default: repo name)'
+    required: false
+    default: ${{ github.event.repository.name }}
+  slack_webhook:
+    description: 'Slack webhook URL'
+    required: false
+    default: ''
+  slack_message:
+    description: 'Slack message (optional custom message)'
+    required: false
+    default: ''
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Setup SSH key
+      uses: shimataro/ssh-key-action@v2
+      with:
+        key: ${{ inputs.ssh_key }}
+        config: |
+          Host server
+            HostName ${{ inputs.ssh_host }}
+            User ${{ inputs.ssh_user }}
+            IdentityFile ~/.ssh/id_rsa
+            HostKeyAlgorithms +ssh-rsa
+            PubkeyAcceptedAlgorithms +ssh-rsa
+            UserKnownHostsFile=/dev/null
+            StrictHostKeyChecking no
+        known_hosts: unnecessary
+
+    - name: Deploy via SCP
+      shell: bash
+      run: ${{ github.action_path }}/deploy-scp.sh
+      env:
+        DEPLOY_PATH: ${{ inputs.deploy_path }}
+
+    - name: Set Default Slack Message
+      shell: bash
+      run: |
+        if [ -z "${{ inputs.slack_message }}" ]; then
+          echo "SLACK_MESSAGE=Hello team! ${{ inputs.site_url }} has been successfully updated with the latest changes. Please take a moment to test the site and report any issues if found." >> $GITHUB_ENV
+        else
+          echo "SLACK_MESSAGE=${{ inputs.slack_message }}" >> $GITHUB_ENV
+        fi
+
+        echo "SLACK_TITLE=:rocket: ${{ inputs.site_url }} has been updated to $(echo $GITHUB_SHA | cut -c1-7)" >> $GITHUB_ENV
+
+    - name: Slack Notification
+      uses: rtCamp/action-slack-notify@master
+      if: ${{ success() && inputs.slack_webhook != '' }}
+      env:
+        SLACK_COLOR: ${{ job.status }}
+        SLACK_TITLE: ${{ env.SLACK_TITLE }}
+        SLACK_USERNAME: 'GitHub Actions'
+        SLACK_WEBHOOK: ${{ inputs.slack_webhook }}
+        SLACK_FOOTER: "🎉 Well done, team! Let's keep the momentum going!"
+        SLACK_MESSAGE: ${{ env.SLACK_MESSAGE }}
+        MSG_MINIMAL: true
