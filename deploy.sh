@@ -20,16 +20,24 @@ fi
 echo "➤ Preparing deployment package..."
 
 # Set the source directory to wp-content
-SOURCE_DIR="$GITHUB_WORKSPACE"
-DEPLOY_DIR="$GITHUB_WORKSPACE"
+SOURCE_DIR="$GITHUB_WORKSPACE/wp-content"
+DEPLOY_DIR="$GITHUB_WORKSPACE/deploy-package"
 rm -rf "$DEPLOY_DIR"
 mkdir -p "$DEPLOY_DIR"
 
-# Always ensure .distignore exists
-[[ -f "$GITHUB_WORKSPACE/.distignore" ]] || {
+# Check for .distignore in root first, then in wp-content
+DISTIGNORE_FILE=""
+if [[ -f "$GITHUB_WORKSPACE/.distignore" ]]; then
+  DISTIGNORE_FILE="$GITHUB_WORKSPACE/.distignore"
+  echo "ℹ︎ Using .distignore from repository root"
+elif [[ -f "$SOURCE_DIR/.distignore" ]]; then
+  DISTIGNORE_FILE="$SOURCE_DIR/.distignore"
+  echo "ℹ︎ Using .distignore from wp-content"
+else
   echo "ℹ︎ .distignore not found, creating an empty one"
   touch "$GITHUB_WORKSPACE/.distignore"
-}
+  DISTIGNORE_FILE="$GITHUB_WORKSPACE/.distignore"
+fi
 
 # Copy files excluding patterns (using rsync locally)
 rsync -av \
@@ -52,7 +60,7 @@ rsync -av \
   --exclude='*.sql' \
   --exclude='*.sqlite' \
   --exclude='*.db' \
-  --exclude-from="$SOURCE_DIR/.distignore" \
+  --exclude-from="$DISTIGNORE_FILE" \
   "$SOURCE_DIR/" "$DEPLOY_DIR/"
 
 echo "✓ Deployment package prepared."
