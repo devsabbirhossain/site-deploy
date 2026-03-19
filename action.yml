@@ -51,7 +51,7 @@ runs:
 
     - name: Deploy via SCP
       shell: bash
-      run: ${{ github.action_path }}/deploy-scp.sh
+      run: ${{ github.action_path }}/deploy.sh
       env:
         DEPLOY_PATH: ${{ inputs.deploy_path }}
 

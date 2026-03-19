@@ -9,36 +9,30 @@ set -eo
 # SETUP VARIABLES AND DEFAULTS #
 #########################################
 if [[ -z "$DEPLOY_PATH" || "$DEPLOY_PATH" == "/" || ! "$DEPLOY_PATH" =~ ^[a-zA-Z0-9/_\.\-]+$ || "$DEPLOY_PATH" != */* ]]; then
-  echo "x︎ DEPLOY_PATH is invalid or unsafe: '$DEPLOY_PATH'"
+  echo "✗ DEPLOY_PATH is invalid or unsafe: '$DEPLOY_PATH'"
   exit 1
 fi
 
 #########################################
-# PREPARE REMOTE PATH #
+# PREPARE DEPLOYMENT PACKAGE #
 #########################################
 
-echo "➤ Preparing remote path..."
-if ssh server "mkdir -p '$DEPLOY_PATH'"; then
-  echo "✓ Remote path ensured."
-else
-  echo "x︎ Failed to create remote path. Exiting..."
-  exit 1
-fi
+echo "➤ Preparing deployment package..."
 
-#########################################
-# DEPLOY FILES VIA RSYNC #
-#########################################
-
-echo "➤ Deploying files via rsync..."
+# Set the source directory to wp-content
+SOURCE_DIR="$GITHUB_WORKSPACE/wp-content"
+DEPLOY_DIR="$GITHUB_WORKSPACE/deploy-package"
+rm -rf "$DEPLOY_DIR"
+mkdir -p "$DEPLOY_DIR"
 
 # Always ensure .distignore exists
-[[ -f "$GITHUB_WORKSPACE/.distignore" ]] || {
+[[ -f "$SOURCE_DIR/.distignore" ]] || {
   echo "ℹ︎ .distignore not found, creating an empty one"
-  touch "$GITHUB_WORKSPACE/.distignore"
+  touch "$SOURCE_DIR/.distignore"
 }
 
-# Run rsync command
-rsync -avz --delete --no-o --no-g \
+# Copy files excluding patterns (using rsync locally)
+rsync -av \
   --exclude='.git/' \
   --exclude='.github/' \
   --exclude='.gitignore' \
@@ -58,10 +52,57 @@ rsync -avz --delete --no-o --no-g \
   --exclude='*.sql' \
   --exclude='*.sqlite' \
   --exclude='*.db' \
-  --exclude-from="$GITHUB_WORKSPACE/.distignore" \
-  "$GITHUB_WORKSPACE/" "server:$DEPLOY_PATH"
+  --exclude-from="$SOURCE_DIR/.distignore" \
+  "$SOURCE_DIR/" "$DEPLOY_DIR/"
 
-echo "✓ Files deployed successfully!"
+echo "✓ Deployment package prepared."
+echo "ℹ︎ Total files to deploy: $(find "$DEPLOY_DIR" -type f | wc -l)"
+
+#########################################
+# PREPARE REMOTE PATH #
+#########################################
+
+echo "➤ Preparing remote path..."
+if ssh server "mkdir -p '$DEPLOY_PATH'"; then
+  echo "✓ Remote path ensured."
+else
+  echo "✗ Failed to create remote path. Exiting..."
+  exit 1
+fi
+
+#########################################
+# DEPLOY FILES VIA SCP #
+#########################################
+
+echo "➤ Deploying files via SCP..."
+
+# Create a tar archive for faster transfer
+cd "$DEPLOY_DIR"
+tar -czf ../deploy.tar.gz .
+cd ..
+
+# Upload the tar file
+if scp -o StrictHostKeyChecking=no deploy.tar.gz server:"$DEPLOY_PATH/"; then
+  echo "✓ Archive uploaded successfully."
+else
+  echo "✗ SCP upload failed"
+  exit 1
+fi
+
+# Extract on remote server and cleanup
+echo "➤ Extracting files on remote server..."
+ssh server "cd '$DEPLOY_PATH' && tar -xzf deploy.tar.gz && rm -f deploy.tar.gz"
+
+if [ $? -eq 0 ]; then
+  echo "✓ Files extracted successfully!"
+else
+  echo "✗ Extraction failed"
+  exit 1
+fi
+
+# Cleanup local files
+rm -f deploy.tar.gz
+rm -rf "$DEPLOY_DIR"
 
 #########################################
 # FLUSH CACHES IF WP-CLI IS AVAILABLE #
